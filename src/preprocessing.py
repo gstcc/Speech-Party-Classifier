@@ -1,6 +1,7 @@
 import pandas as pd
 import re
 import spacy
+import random
 
 # Disable unused components, otherwise my computer starts to struggle
 nlp = spacy.load("en_core_web_lg", disable=["parser", "ner"])
@@ -10,14 +11,17 @@ PATH = "../data/df_HoC_2000s.csv"
 
 
 def read_data(file=PATH, nrows=1000):
+    # The file is so big it's slow to read all at once, use this instead to choose which rows are used
+    total_lines = sum(1 for line in open(file)) - 1 
+    skip = sorted(random.sample(range(1, total_lines + 1), total_lines - nrows))
+    
     df = pd.read_csv(
         file,
         usecols=["speechnumber", "speaker", "party", "text"],
         index_col="speechnumber",
-        nrows=nrows,
+        skiprows=skip
     )
     return df.dropna(subset=["text", "party"])
-
 
 def clean_text_basic(text: str) -> str:
     """Basic cleaning before spaCy to reduce noise."""
@@ -49,6 +53,14 @@ def preprocess(df, batch_size=100, sample_destination="../data/processed_sample.
     # print(df[["party", "tokenized"]].head())
     df.to_csv(sample_destination)
     return df
+
+
+def preprocess_for_bert(text: str) -> str:
+    if pd.isna(text):
+        return ""
+    # Only remove extra whitespace/newlines
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
 
 
 # if __name__ == "__main__":
