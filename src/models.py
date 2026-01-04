@@ -2,7 +2,8 @@ from preprocessing import (
     preprocess,
     read_data,
     preprocess_for_bert,
-    clean_agenda,  # Ensure this is in your preprocessing.py
+    clean_agenda,  
+    map_agenda_to_broad_topic
 )
 from utils import plot_confusion_matrix
 from sklearn.model_selection import train_test_split
@@ -30,7 +31,9 @@ from transformers import (
 
 def get_data(nrows):
     df = read_data(nrows=nrows)
-    df["target"] = df["agenda"].apply(clean_agenda)
+    df["clean_agenda"] = df["agenda"].apply(clean_agenda)
+    df["target"] = df["clean_agenda"].apply(map_agenda_to_broad_topic)
+
     top_n = 10
     top_topics = df["target"].value_counts().nlargest(top_n).index
     df = df[df["target"].isin(top_topics)].copy()
@@ -137,7 +140,7 @@ def run_bert(df_train, df_test):
         metric_for_best_model="accuracy",
         per_device_train_batch_size=8,
         per_device_eval_batch_size=8,
-        fp16=False,  # Set True if you have GPU
+        fp16=True,  # Set True if you have GPU
         report_to="none",
     )
 

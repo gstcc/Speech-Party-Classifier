@@ -12,11 +12,9 @@ def plot_confusion_matrix(y_true, y_pred):
         cm,
         annot=True,
         fmt="d",
-        xticklabels=["AGAINST", "FAVOR", "NONE"],
-        yticklabels=["AGAINST", "FAVOR", "NONE"],
     )
     plt.ylabel("Actual")
     plt.xlabel("Predicted")
     plt.title("Stance Detection Confusion Matrix")
     # plt.show()
-    plt.savefig()
+    plt.savefig("plot")

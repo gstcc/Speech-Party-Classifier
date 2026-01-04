@@ -9,33 +9,36 @@ nlp = spacy.load("en_core_web_lg", disable=["parser", "ner"])
 parties = ["Lab", "Con"]
 PATH = "../data/df_HoC_2000s.csv"
 
+def map_agenda_to_broad_topic(agenda):
+    if not isinstance(agenda, str):
+        return None
+    text = agenda.strip()
+    return agenda
 
 def clean_agenda(agenda_str, mode="title"):
     if not isinstance(agenda_str, str):
         return ""  # Return empty string instead of None to prevent errors
 
+
     clean_str = (
         agenda_str.replace("Oral Answers To Questions", "")
         .replace("Oral Answers", "")
         .strip()
+        .lower()
     )
+    # First try to get e.g Social Security from > Social Security] part, otherwise take first sentence
+    if "[" in clean_str and "]" in clean_str:
+        try:
+            content = clean_str.split("[")[1].split("]")[0]
+            parts = [p.strip() for p in content.split(">")]
+            for part in reversed(parts):
+                if len(part) > 3 and not part.endswith("..."):
+                    return part
+        except:
+            pass
+    elif "[" in clean_str:
+        return clean_str.split("[")[0].strip()
 
-    if mode == "title":
-        if "[" in clean_str:
-            return clean_str.split("[")[0].strip()
-        return clean_str
-
-    if mode == "derived":
-        if "[" in clean_str and "]" in clean_str:
-            try:
-                content = clean_str.split("[")[1].split("]")[0]
-                parts = [p.strip() for p in content.split(">")]
-                for part in reversed(parts):
-                    if len(part) > 3 and not part.endswith("..."):
-                        return part
-            except:
-                pass
-        return ""
 
     return clean_str  # Fallback
 
