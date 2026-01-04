@@ -10,18 +10,40 @@ parties = ["Lab", "Con"]
 PATH = "../data/df_HoC_2000s.csv"
 
 
+def clean_agenda(agenda_str):
+    # Extracts text after the last '>' inside brackets
+    # Ex: "[Oral Answers... > Social Security]" -> "Social Security"
+    if not isinstance(agenda_str, str) or ">" not in agenda_str:
+        return None
+    try:
+        # Split by '>' and take the last part, then remove the closing bracket ']'
+        return agenda_str.split(">")[-1].replace("]", "").strip()
+    except:
+        return None
+
+
 def read_data(file=PATH, nrows=1000):
-    # The file is so big it's slow to read all at once, use this instead to choose which rows are used
-    total_lines = sum(1 for line in open(file)) - 1 
-    skip = sorted(random.sample(range(1, total_lines + 1), total_lines - nrows))
-    
+    approx_total = 300_000
+    p = (nrows * 1.5) / approx_total
+
+    def keep_row(index):
+        if index == 0:
+            return False
+        return random.random() > p
+
     df = pd.read_csv(
         file,
-        usecols=["speechnumber", "speaker", "party", "text"],
+        usecols=["speechnumber", "speaker", "party", "text", "agenda"],
         index_col="speechnumber",
-        skiprows=skip
+        skiprows=keep_row,
     )
-    return df.dropna(subset=["text", "party"])
+
+    df = df.dropna(subset=["text", "party"])
+    if len(df) > nrows:
+        df = df.sample(n=nrows)
+
+    return df
+
 
 def clean_text_basic(text: str) -> str:
     """Basic cleaning before spaCy to reduce noise."""
