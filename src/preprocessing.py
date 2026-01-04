@@ -10,16 +10,34 @@ parties = ["Lab", "Con"]
 PATH = "../data/df_HoC_2000s.csv"
 
 
-def clean_agenda(agenda_str):
-    # Extracts text after the last '>' inside brackets
-    # Ex: "[Oral Answers... > Social Security]" -> "Social Security"
-    if not isinstance(agenda_str, str) or ">" not in agenda_str:
-        return None
-    try:
-        # Split by '>' and take the last part, then remove the closing bracket ']'
-        return agenda_str.split(">")[-1].replace("]", "").strip()
-    except:
-        return None
+def clean_agenda(agenda_str, mode="title"):
+    if not isinstance(agenda_str, str):
+        return ""  # Return empty string instead of None to prevent errors
+
+    clean_str = (
+        agenda_str.replace("Oral Answers To Questions", "")
+        .replace("Oral Answers", "")
+        .strip()
+    )
+
+    if mode == "title":
+        if "[" in clean_str:
+            return clean_str.split("[")[0].strip()
+        return clean_str
+
+    if mode == "derived":
+        if "[" in clean_str and "]" in clean_str:
+            try:
+                content = clean_str.split("[")[1].split("]")[0]
+                parts = [p.strip() for p in content.split(">")]
+                for part in reversed(parts):
+                    if len(part) > 3 and not part.endswith("..."):
+                        return part
+            except:
+                pass
+        return ""
+
+    return clean_str  # Fallback
 
 
 def read_data(file=PATH, nrows=1000):
