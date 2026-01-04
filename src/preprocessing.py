@@ -2,6 +2,10 @@ import pandas as pd
 import re
 import spacy
 import random
+from transformers import pipeline
+from tqdm import tqdm
+import pandas as pd
+import torch
 
 # Disable unused components, otherwise my computer starts to struggle
 nlp = spacy.load("en_core_web_lg", disable=["parser", "ner"])
@@ -10,136 +14,94 @@ parties = ["Lab", "Con"]
 PATH = "../data/df_HoC_2000s.csv"
 
 
+def generate_ai_topic_map(unique_agendas):
+    """
+    Uses a Zero-Shot classifier to decide the best topic for each agenda string.
+    """
+    print(f"AI is classifying {len(unique_agendas)} unique topics...")
+    
+    classifier = pipeline("zero-shot-classification", model="valhalla/distilbart-mnli-12-1", device=(0 if torch.cuda.is_available() else -1)) # Use GPU if available
+
+    # 2. Define your broad buckets
+    candidate_labels = [
+        "Economy", "Health", "Education", "Defense", "Foreign Policy", 
+        "Welfare", "Transport", "Environment", "Law & Crime", 
+        "Housing", "Culture", "Democracy", "International Affairs"
+    ]
+    
+    # 3. Classify
+    # We batch processing for speed if using a GPU, but loop is safer for simple CPU usage
+    mapping = {}
+    
+    for agenda in tqdm(unique_agendas):
+        if not isinstance(agenda, str) or len(agenda) < 3:
+            mapping[agenda] = "Other"
+            continue
+            
+        # The AI predicts the relationship
+        result = classifier(agenda, candidate_labels)
+        
+        # Take the top predicted label
+        best_label = result['labels'][0]
+        score = result['scores'][0]
+        
+        # Optional: Threshold. If AI isn't sure (< 0.3), call it 'Other'
+        if score < 0.3:
+            mapping[agenda] = "Other"
+        else:
+            mapping[agenda] = best_label
+            
+    return mapping
+
 def map_agenda_to_broad_topic(agenda):
-    if not isinstance(agenda, str) or len(agenda) < 2:
-        return "Other"
-
+    if not isinstance(agenda, str):
+        return None
+    
     text = agenda.lower().strip()
-
+    
+    # 1. Noise Filter (Expanded based on your data)
     noise_keywords = [
-        "clause",
-        "schedule",
-        "orders of the day",
-        "petition",
-        "allotted day",
-        "address",
-        "business of the house",
-        "point of order",
-        "royal assent",
-        "sittings of the house",
+        'points of order', 'business of the house', 'sittings of the house', 
+        'royal assent', 'speaker\'s statement', 'petition'
     ]
     if any(k in text for k in noise_keywords):
-        return "Other"
+        return None 
 
-    mappings = {
-        "Welfare & Pensions": [
-            "work and pensions",
-            "social security",
-            "welfare",
-            "benefits",
-            "disability",
-            "child support",
-            "poverty",
-            "winter fuel",
-        ],
-        "Health": ["health", "nhs", "care", "hospitals", "mental", "patients"],
-        "Economy": [
-            "treasury",
-            "budget",
-            "finance",
-            "economy",
-            "tax",
-            "business",
-            "trade",
-            "industry",
-            "expenditure",
-            "bank",
-            "fina",
-        ],
-        "Education": [
-            "education",
-            "schools",
-            "universities",
-            "skills",
-            "teaching",
-            "students",
-        ],
-        "Democracy & Constitution": [
-            "elections",
-            "referendums",
-            "political parties",
-            "voting",
-            "parliament",
-            "constitutional",
-            "lords",
-            "house of commons",
-            "electoral",
-            "westminster",
-        ],
-        "Defense": ["defence", "armed forces", "military", "navy", "army", "raf"],
-        "Foreign Policy": [
-            "foreign",
-            "commonwealth",
-            "international",
-            "european",
-            "brexit",
-            "diplomatic",
-            "global",
-            "treaty",
-        ],
-        "Law & Crime": [
-            "home department",
-            "justice",
-            "police",
-            "crime",
-            "prison",
-            "courts",
-            "legal",
-            "attorney",
-            "solicitor",
-            "law",
-        ],
-        "Transport": [
-            "transport",
-            "rail",
-            "road",
-            "aviation",
-            "buses",
-            "traffic",
-            "hs2",
-        ],
-        "Environment": [
-            "environment",
-            "climate",
-            "energy",
-            "food",
-            "rural",
-            "farming",
-            "water",
-            "animals",
-            "flood",
-        ],
-        "Housing & Local Govt": [
-            "communities",
-            "local government",
-            "housing",
-            "planning",
-            "council",
-        ],
-        "Culture": ["culture", "media", "sport", "olympics", "arts", "heritage"],
-        "Prime Minister (PMQs)": [
-            "prime minister",
-            "deputy prime minister",
-            "cabinet office",
-        ],
-    }
+    if any(k in text for k in ['health', 'nhs', 'care', 'hospitals', 'mental', 'patients', 'doctors', 'nurses', 'medical', 'euthanasia']):
+        return 'Health'
+        
+    if any(k in text for k in ['education', 'schools', 'universities', 'skills', 'teaching', 'students']):
+        return 'Education'
+        
+    if any(k in text for k in ['transport', 'rail', 'road', 'aviation', 'buses', 'traffic', 'vehicle emissions', 'drivers']):
+        return 'Transport'
+        
+    if any(k in text for k in ['social security', 'welfare', 'benefits', 'disability', 'child support', 'poverty', 'pensions', 'families tax credit']):
+        return 'Welfare & Pensions'
+        
+    if any(k in text for k in ['environment', 'climate', 'energy', 'food', 'rural', 'farming', 'agriculture', 'fisheries', 'water', 'animals', 'bovine', 'badgers', 'gmos', 'biotechnology', 'acid rain']):
+        return 'Environment'
+        
+    if any(k in text for k in ['home department', 'justice', 'police', 'crime', 'prison', 'courts', 'legal', 'magistrates', 'sexual offences', 'cryptography']):
+        return 'Law & Crime'
+        
+    if any(k in text for k in ['communities', 'local government', 'housing', 'planning', 'council']):
+        return 'Housing & Local Govt'
+        
+    if any(k in text for k in ['culture', 'media', 'sport', 'olympics', 'arts']):
+        return 'Culture'
 
-    for topic, keywords in mappings.items():
-        if any(k in text for k in keywords):
-            return topic
+    if any(k in text for k in ['defence', 'armed forces', 'military', 'navy', 'army', 'foreign', 'commonwealth', 'international', 'european', 'yugoslavia', 'asylum', 'immigration']):
+        return 'International Affairs'
 
+    # General stuff, added last to avoid confusion for model, since basically everything is about economy especially
+    if any(k in text for k in ['elections', 'referendums', 'political parties', 'voting', 'parliament', 'constitutional', 'representation of the people', 'electoral', 'disqualifications']):
+        return 'Democracy & Constitution'
+
+    if any(k in text for k in ['treasury', 'budget', 'finance', 'economy', 'tax', 'business', 'trade', 'industry', 'financial services', 'fair trading', 'utilities', 'competitiveness', 'debt']):
+        return 'Economy'
+            
     return "Other"
-
 
 def clean_agenda(agenda_str, mode="auto"):
     if not isinstance(agenda_str, str):
@@ -154,20 +116,29 @@ def clean_agenda(agenda_str, mode="auto"):
     if mode == "title_only":
         if "[" in clean_str:
             return clean_str.split("[")[0].strip()
-        return clean_str  # If no brackets, the whole text is the title
+        return clean_str
 
-    if mode == "breadcrumb_only":
-        if "[" in clean_str and "]" in clean_str:
+    if mode == 'breadcrumb_only':
+        if '[' in clean_str and ']' in clean_str:
             try:
-                content = clean_str.split("[")[1].split("]")[0]
-                parts = [p.strip() for p in content.split(">")]
-                # Return the last valid part that isn't truncated
+                content = clean_str.split('[')[-1].split(']')[0]
+                parts = [p.strip() for p in content.split('>')]
+                
+                
                 for part in reversed(parts):
-                    if len(part) > 3 and not part.endswith("..."):
-                        return part
+                    lower_part = part.lower()
+                    # Skip garbage, sectioon 1 as label says nothing about actual topic
+                    if any(x in lower_part for x in ["clause", "schedule", "orders of the day", "programme", "resolution"]):
+                        continue
+                    if len(part) < 3 or part.endswith("..."):
+                        continue
+                    
+                    return part 
+                
+                return clean_str.split("[")[0].strip()
             except:
                 pass
-        return ""  # No valid breadcrumb found
+        return "" 
 
     return clean_str
 

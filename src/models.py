@@ -4,8 +4,10 @@ from preprocessing import (
     preprocess_for_bert,
     clean_agenda,
     map_agenda_to_broad_topic,
+    generate_ai_topic_map
+    
 )
-from utils import plot_confusion_matrix
+from utils import plot_confusion_matrix, WeightedTrainer
 from sklearn.model_selection import train_test_split
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.naive_bayes import MultinomialNB
@@ -27,20 +29,22 @@ from transformers import (
     Trainer,
     DataCollatorWithPadding,
 )
-
+from sklearn.utils.class_weight import compute_class_weight
+import torch
+from transformers import BertTokenizer, EarlyStoppingCallback
 
 def get_data(nrows):
-    df = read_data()
+    df = read_data(nrows=nrows)
 
-    df["title_raw"] = df["agenda"].apply(lambda x: clean_agenda(x, mode="title_only"))
     df["crumb_raw"] = df["agenda"].apply(
         lambda x: clean_agenda(x, mode="breadcrumb_only")
     )
+    df["title_raw"] = df["agenda"].apply(lambda x: clean_agenda(x, mode="title_only"))
 
-    df["target"] = df["title_raw"].apply(map_agenda_to_broad_topic)
+    df["target"] = df["crumb_raw"].apply(map_agenda_to_broad_topic)
 
     mask_other = df["target"] == "Other"
-    df.loc[mask_other, "target"] = df.loc[mask_other, "crumb_raw"].apply(
+    df.loc[mask_other, "target"] = df.loc[mask_other, "title_raw"].apply(
         map_agenda_to_broad_topic
     )
 
@@ -51,6 +55,21 @@ def get_data(nrows):
     df["tokenized"] = df["text"].str.lower().str.replace(r"[^\w\s]", "", regex=True)
     df["bert_text"] = df["text"]
 
+    return df
+
+def get_data_with_ai_mapping(nrows):
+    
+    df = read_data(nrows=nrows)
+    df['clean_agenda'] = df['agenda'].apply(lambda x: clean_agenda(x, mode="breadcrumb_only"))
+    mask_empty = df['clean_agenda'] == ""
+    df.loc[mask_empty, 'clean_agenda'] = df.loc[mask_empty, 'agenda'].apply(lambda x: clean_agenda(x, mode="title_only"))
+    unique_agendas = df['clean_agenda'].unique()
+    ai_topic_map = generate_ai_topic_map(unique_agendas)
+    df['target'] = df['clean_agenda'].map(ai_topic_map)
+    df = df[df['target'] != "Other"]
+    df = preprocess(df)
+    df["bert_text"] = df["text"].apply(preprocess_for_bert)
+    
     return df
 
 
@@ -83,7 +102,7 @@ def run_xgboost(X_train_vec, X_test_vec, y_train, y_test):
         max_depth=6,
         learning_rate=0.1,
         tree_method="hist",
-        objective="multi:softmax",  # Explicitly set for multi-class
+        objective="multi:softmax",  # Set for multi-class
         num_class=len(le.classes_),
     )
 
@@ -110,51 +129,61 @@ def compute_metrics(eval_pred):
 
 
 def run_bert(df_train, df_test):
-    print("\n--- BERT ---")
-    model_name = "distilbert-base-uncased"
+    print("\n--- RoBERTa (Optimized) ---")
+    model_name = "roberta-base"
     tokenizer = AutoTokenizer.from_pretrained(model_name)
+    
     unique_labels = sorted(df_train["target"].unique())
     label_map = {label: i for i, label in enumerate(unique_labels)}
     num_labels = len(unique_labels)
-    print(f"BERT training on {num_labels} topics.")
+    
     df_train["label"] = df_train["target"].map(label_map)
     df_test["label"] = df_test["target"].map(label_map)
 
     def tokenize_func(examples):
-        return tokenizer(examples["bert_text"], truncation=True, max_length=256)
+        return tokenizer(examples["bert_text"], truncation=True, max_length=512)
 
-    train_ds = Dataset.from_pandas(df_train[["bert_text", "label"]]).map(
-        tokenize_func, batched=True
+    train_ds = Dataset.from_pandas(df_train[["bert_text", "label"]]).map(tokenize_func, batched=True)
+    test_ds = Dataset.from_pandas(df_test[["bert_text", "label"]]).map(tokenize_func, batched=True)
+
+    class_weights = compute_class_weight(
+        class_weight="balanced",
+        classes=np.unique(df_train["label"]),
+        y=df_train["label"]
     )
-    test_ds = Dataset.from_pandas(df_test[["bert_text", "label"]]).map(
-        tokenize_func, batched=True
-    )
+    weights_tensor = torch.tensor(class_weights, dtype=torch.float)
 
     train_ds = train_ds.rename_column("label", "labels")
     test_ds = test_ds.rename_column("label", "labels")
-
     data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
-    model = AutoModelForSequenceClassification.from_pretrained(
-        model_name, num_labels=num_labels
-    )
+    model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=num_labels)
+
+    
+    print("Freezing bottom 6 layers of RoBERTa...")
+    for name, param in model.roberta.encoder.layer.named_parameters():
+        layer_num = int(name.split('.')[0])
+        if layer_num < 6: 
+            param.requires_grad = False
 
     training_args = TrainingArguments(
-        output_dir="./bert_agenda_results",
+        output_dir="./roberta_results",
         eval_strategy="epoch",
         save_strategy="epoch",
-        num_train_epochs=3,
-        learning_rate=2e-5,
-        warmup_steps=100,
+        num_train_epochs=10,           
+        learning_rate=3e-5,           
+        warmup_steps=500,             
         load_best_model_at_end=True,
         metric_for_best_model="accuracy",
         per_device_train_batch_size=8,
         per_device_eval_batch_size=8,
-        fp16=True,  # Set True if you have GPU
+        weight_decay=0.1,             
+        label_smoothing_factor=0.1,   
+        fp16=torch.cuda.is_available(),
         report_to="none",
     )
 
-    trainer = Trainer(
+    trainer = WeightedTrainer(
         model=model,
         args=training_args,
         train_dataset=train_ds,
@@ -162,29 +191,30 @@ def run_bert(df_train, df_test):
         tokenizer=tokenizer,
         data_collator=data_collator,
         compute_metrics=compute_metrics,
+        weights_tensor=weights_tensor,
+        callbacks=[EarlyStoppingCallback(early_stopping_patience=3)]
     )
 
-    print("Training BERT (this may take a while)...")
+    print("Training RoBERTa...")
     trainer.train()
 
     results = trainer.evaluate()
     print(f"\n--- BERT RESULTS ---")
     print(f"Accuracy:  {results.get('eval_accuracy', 0):.4f}")
     print(f"F1-Score:  {results.get('eval_f1', 0):.4f}")
-
+    
+    # Plotting
     print("Generating Confusion Matrix...")
     predictions_output = trainer.predict(test_ds)
     y_pred = np.argmax(predictions_output.predictions, axis=-1)
     y_true = predictions_output.label_ids
-
-    plot_confusion_matrix(y_true, y_pred)
+    plot_confusion_matrix(y_true, y_pred, unique_labels)
 
 
 def run_experiments():
-    # Load data (Agenda Task)
-    df = get_data(nrows=20_000)
+    df = get_data(nrows=50_000)
+    #df = get_data_with_ai_mapping(nrows=50_000)
 
-    # Use 'target' (the cleaned agenda) as y
     df_train, df_test = train_test_split(
         df, test_size=0.2, random_state=42, stratify=df["target"]
     )
@@ -202,7 +232,7 @@ def run_experiments():
 
     run_naive_bayes(X_train_vec, X_test_vec, y_train, y_test)
     run_logistic_regression(X_train_vec, X_test_vec, y_train, y_test)
-    run_xgboost(X_train_vec, X_test_vec, y_train, y_test)
+    #run_xgboost(X_train_vec, X_test_vec, y_train, y_test)
 
     run_bert(df_train, df_test)
 
