@@ -2,8 +2,8 @@ from preprocessing import (
     preprocess,
     read_data,
     preprocess_for_bert,
-    clean_agenda,  
-    map_agenda_to_broad_topic
+    clean_agenda,
+    map_agenda_to_broad_topic,
 )
 from utils import plot_confusion_matrix
 from sklearn.model_selection import train_test_split
@@ -30,17 +30,27 @@ from transformers import (
 
 
 def get_data(nrows):
-    df = read_data(nrows=nrows)
-    df["clean_agenda"] = df["agenda"].apply(clean_agenda)
-    df["target"] = df["clean_agenda"].apply(map_agenda_to_broad_topic)
+    df = read_data()
 
-    top_n = 10
-    top_topics = df["target"].value_counts().nlargest(top_n).index
+    df["title_raw"] = df["agenda"].apply(lambda x: clean_agenda(x, mode="title_only"))
+    df["crumb_raw"] = df["agenda"].apply(
+        lambda x: clean_agenda(x, mode="breadcrumb_only")
+    )
+
+    df["target"] = df["title_raw"].apply(map_agenda_to_broad_topic)
+
+    mask_other = df["target"] == "Other"
+    df.loc[mask_other, "target"] = df.loc[mask_other, "crumb_raw"].apply(
+        map_agenda_to_broad_topic
+    )
+
+    df = df[df["target"] != "Other"]
+    top_topics = df["target"].value_counts().nlargest(13).index
     df = df[df["target"].isin(top_topics)].copy()
+    print("Final Topic Distribution:\n", df["target"].value_counts())
+    df["tokenized"] = df["text"].str.lower().str.replace(r"[^\w\s]", "", regex=True)
+    df["bert_text"] = df["text"]
 
-    print(f"Filtered dataset to top {top_n} topics: {list(top_topics)}")
-    df = preprocess(df)  # Creates df['tokenized']
-    df["bert_text"] = df["text"].apply(preprocess_for_bert)
     return df
 
 
@@ -184,19 +194,16 @@ def run_experiments():
     y_train = df_train["target"]
     y_test = df_test["target"]
 
-    # TF-IDF Vectorization
     vectorizer = TfidfVectorizer(
         stop_words="english", max_features=10000, ngram_range=(1, 2)
     )
     X_train_vec = vectorizer.fit_transform(X_train_text)
     X_test_vec = vectorizer.transform(X_test_text)
 
-    # Run Models
     run_naive_bayes(X_train_vec, X_test_vec, y_train, y_test)
     run_logistic_regression(X_train_vec, X_test_vec, y_train, y_test)
     run_xgboost(X_train_vec, X_test_vec, y_train, y_test)
 
-    # Run BERT
     run_bert(df_train, df_test)
 
 

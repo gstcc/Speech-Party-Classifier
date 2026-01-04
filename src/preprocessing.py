@@ -9,38 +9,167 @@ nlp = spacy.load("en_core_web_lg", disable=["parser", "ner"])
 parties = ["Lab", "Con"]
 PATH = "../data/df_HoC_2000s.csv"
 
+
 def map_agenda_to_broad_topic(agenda):
-    if not isinstance(agenda, str):
-        return None
-    text = agenda.strip()
-    return agenda
+    if not isinstance(agenda, str) or len(agenda) < 2:
+        return "Other"
 
-def clean_agenda(agenda_str, mode="title"):
+    text = agenda.lower().strip()
+
+    noise_keywords = [
+        "clause",
+        "schedule",
+        "orders of the day",
+        "petition",
+        "allotted day",
+        "address",
+        "business of the house",
+        "point of order",
+        "royal assent",
+        "sittings of the house",
+    ]
+    if any(k in text for k in noise_keywords):
+        return "Other"
+
+    mappings = {
+        "Welfare & Pensions": [
+            "work and pensions",
+            "social security",
+            "welfare",
+            "benefits",
+            "disability",
+            "child support",
+            "poverty",
+            "winter fuel",
+        ],
+        "Health": ["health", "nhs", "care", "hospitals", "mental", "patients"],
+        "Economy": [
+            "treasury",
+            "budget",
+            "finance",
+            "economy",
+            "tax",
+            "business",
+            "trade",
+            "industry",
+            "expenditure",
+            "bank",
+            "fina",
+        ],
+        "Education": [
+            "education",
+            "schools",
+            "universities",
+            "skills",
+            "teaching",
+            "students",
+        ],
+        "Democracy & Constitution": [
+            "elections",
+            "referendums",
+            "political parties",
+            "voting",
+            "parliament",
+            "constitutional",
+            "lords",
+            "house of commons",
+            "electoral",
+            "westminster",
+        ],
+        "Defense": ["defence", "armed forces", "military", "navy", "army", "raf"],
+        "Foreign Policy": [
+            "foreign",
+            "commonwealth",
+            "international",
+            "european",
+            "brexit",
+            "diplomatic",
+            "global",
+            "treaty",
+        ],
+        "Law & Crime": [
+            "home department",
+            "justice",
+            "police",
+            "crime",
+            "prison",
+            "courts",
+            "legal",
+            "attorney",
+            "solicitor",
+            "law",
+        ],
+        "Transport": [
+            "transport",
+            "rail",
+            "road",
+            "aviation",
+            "buses",
+            "traffic",
+            "hs2",
+        ],
+        "Environment": [
+            "environment",
+            "climate",
+            "energy",
+            "food",
+            "rural",
+            "farming",
+            "water",
+            "animals",
+            "flood",
+        ],
+        "Housing & Local Govt": [
+            "communities",
+            "local government",
+            "housing",
+            "planning",
+            "council",
+        ],
+        "Culture": ["culture", "media", "sport", "olympics", "arts", "heritage"],
+        "Prime Minister (PMQs)": [
+            "prime minister",
+            "deputy prime minister",
+            "cabinet office",
+        ],
+    }
+
+    for topic, keywords in mappings.items():
+        if any(k in text for k in keywords):
+            return topic
+
+    return "Other"
+
+
+def clean_agenda(agenda_str, mode="auto"):
     if not isinstance(agenda_str, str):
-        return ""  # Return empty string instead of None to prevent errors
-
+        return ""
 
     clean_str = (
         agenda_str.replace("Oral Answers To Questions", "")
         .replace("Oral Answers", "")
         .strip()
-        .lower()
     )
-    # First try to get e.g Social Security from > Social Security] part, otherwise take first sentence
-    if "[" in clean_str and "]" in clean_str:
-        try:
-            content = clean_str.split("[")[1].split("]")[0]
-            parts = [p.strip() for p in content.split(">")]
-            for part in reversed(parts):
-                if len(part) > 3 and not part.endswith("..."):
-                    return part
-        except:
-            pass
-    elif "[" in clean_str:
-        return clean_str.split("[")[0].strip()
 
+    if mode == "title_only":
+        if "[" in clean_str:
+            return clean_str.split("[")[0].strip()
+        return clean_str  # If no brackets, the whole text is the title
 
-    return clean_str  # Fallback
+    if mode == "breadcrumb_only":
+        if "[" in clean_str and "]" in clean_str:
+            try:
+                content = clean_str.split("[")[1].split("]")[0]
+                parts = [p.strip() for p in content.split(">")]
+                # Return the last valid part that isn't truncated
+                for part in reversed(parts):
+                    if len(part) > 3 and not part.endswith("..."):
+                        return part
+            except:
+                pass
+        return ""  # No valid breadcrumb found
+
+    return clean_str
 
 
 def read_data(file=PATH, nrows=1000):
