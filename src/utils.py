@@ -26,7 +26,7 @@ class WeightedTrainer(Trainer):
         return (loss, outputs) if return_outputs else loss
 
 
-def plot_confusion_matrix(y_true, y_pred, labels=None):
+def plot_confusion_matrix(y_true, y_pred, labels=None, mode=None):
     cm = confusion_matrix(y_true, y_pred)    
     plt.figure(figsize=(12, 10))
     
@@ -48,5 +48,5 @@ def plot_confusion_matrix(y_true, y_pred, labels=None):
         plt.yticks(rotation=0)
         
     plt.tight_layout() 
-    plt.savefig("plot.png")
+    plt.savefig(f"plot_{mode}.png")
     plt.close()

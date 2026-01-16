@@ -6,6 +6,8 @@ from transformers import pipeline
 from tqdm import tqdm
 import pandas as pd
 import torch
+import os
+import json
 
 # Disable unused components, otherwise my computer starts to struggle
 nlp = spacy.load("en_core_web_lg", disable=["parser", "ner"])
@@ -14,43 +16,28 @@ parties = ["Lab", "Con"]
 PATH = "../data/df_HoC_2000s.csv"
 
 
-def generate_ai_topic_map(unique_agendas):
-    """
-    Uses a Zero-Shot classifier to decide the best topic for each agenda string.
-    """
-    print(f"AI is classifying {len(unique_agendas)} unique topics...")
-    
-    classifier = pipeline("zero-shot-classification", model="valhalla/distilbart-mnli-12-1", device=(0 if torch.cuda.is_available() else -1)) # Use GPU if available
-
-    # 2. Define your broad buckets
+def generate_ai_topic_map(unique_agendas, cache_file="ai_topic_cache.json"):
     candidate_labels = [
-        "Economy", "Health", "Education", "Defense", "Foreign Policy", 
-        "Welfare", "Transport", "Environment", "Law & Crime", 
-        "Housing", "Culture", "Democracy", "International Affairs"
+        "Health", "Education", "Transport", "Welfare & Pensions", 
+        "Environment", "Law & Crime", "Housing & Local Govt", 
+        "Culture", "International Affairs", "Democracy & Constitution", "Economy"
     ]
     
-    # 3. Classify
-    # We batch processing for speed if using a GPU, but loop is safer for simple CPU usage
+    classifier = pipeline("zero-shot-classification", model="valhalla/distilbart-mnli-12-1", device=(0 if torch.cuda.is_available() else -1)) # Use GPU if available
+ 
+
     mapping = {}
     
-    for agenda in tqdm(unique_agendas):
-        if not isinstance(agenda, str) or len(agenda) < 3:
-            mapping[agenda] = "Other"
-            continue
-            
-        # The AI predicts the relationship
-        result = classifier(agenda, candidate_labels)
-        
-        # Take the top predicted label
-        best_label = result['labels'][0]
-        score = result['scores'][0]
-        
-        # Optional: Threshold. If AI isn't sure (< 0.3), call it 'Other'
-        if score < 0.3:
-            mapping[agenda] = "Other"
+
+    print(f"AI is classifying {len(unique_agendas)} unique topics in batches...")
+    results = classifier(list(unique_agendas), candidate_labels, batch_size=16)
+
+    for agenda, res in zip(unique_agendas, results):
+        if res['scores'][0] > 0.4:
+            mapping[agenda] = res['labels'][0]
         else:
-            mapping[agenda] = best_label
-            
+            mapping[agenda] = "Other"
+        
     return mapping
 
 def map_agenda_to_broad_topic(agenda):

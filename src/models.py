@@ -58,15 +58,12 @@ def get_data(nrows):
     return df
 
 def get_data_with_ai_mapping(nrows):
-    
-    df = read_data(nrows=nrows)
-    df['clean_agenda'] = df['agenda'].apply(lambda x: clean_agenda(x, mode="breadcrumb_only"))
-    mask_empty = df['clean_agenda'] == ""
-    df.loc[mask_empty, 'clean_agenda'] = df.loc[mask_empty, 'agenda'].apply(lambda x: clean_agenda(x, mode="title_only"))
-    unique_agendas = df['clean_agenda'].unique()
+    df = read_data(nrows=nrows)    
+    unique_agendas = df['agenda'].dropna().unique().tolist()
     ai_topic_map = generate_ai_topic_map(unique_agendas)
-    df['target'] = df['clean_agenda'].map(ai_topic_map)
-    df = df[df['target'] != "Other"]
+    df['target'] = df['agenda'].map(ai_topic_map)
+    df = df[df["target"].notna() & (df["target"] != "Other")].copy()    
+    print("Preprocessing text...")
     df = preprocess(df)
     df["bert_text"] = df["text"].apply(preprocess_for_bert)
     
@@ -109,7 +106,6 @@ def run_xgboost(X_train_vec, X_test_vec, y_train, y_test):
     print("Training XGBoost...")
     model.fit(X_train_vec, y_train_num)
 
-    # 3. Predict
     preds_num = model.predict(X_test_vec)
     preds = le.inverse_transform(preds_num)
 
@@ -128,7 +124,7 @@ def compute_metrics(eval_pred):
     return {"accuracy": acc, "f1": f1, "precision": precision, "recall": recall}
 
 
-def run_bert(df_train, df_test):
+def run_bert(df_train, df_test, mode):
     print("\n--- RoBERTa (Optimized) ---")
     model_name = "roberta-base"
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -208,12 +204,12 @@ def run_bert(df_train, df_test):
     predictions_output = trainer.predict(test_ds)
     y_pred = np.argmax(predictions_output.predictions, axis=-1)
     y_true = predictions_output.label_ids
-    plot_confusion_matrix(y_true, y_pred, unique_labels)
+    plot_confusion_matrix(y_true, y_pred, unique_labels, mode=mode)
 
 
 def run_experiments():
-    df = get_data(nrows=50_000)
-    #df = get_data_with_ai_mapping(nrows=50_000)
+    df = get_data(nrows=60_000)
+    #df = get_data_with_ai_mapping(nrows=30_000)
 
     df_train, df_test = train_test_split(
         df, test_size=0.2, random_state=42, stratify=df["target"]
@@ -232,9 +228,9 @@ def run_experiments():
 
     run_naive_bayes(X_train_vec, X_test_vec, y_train, y_test)
     run_logistic_regression(X_train_vec, X_test_vec, y_train, y_test)
-    #run_xgboost(X_train_vec, X_test_vec, y_train, y_test)
+    run_xgboost(X_train_vec, X_test_vec, y_train, y_test)
 
-    run_bert(df_train, df_test)
+    run_bert(df_train, df_test, mode="breadcrumb")
 
 
 if __name__ == "__main__":
