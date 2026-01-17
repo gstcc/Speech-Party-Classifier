@@ -63,6 +63,7 @@ def get_data_with_ai_mapping(nrows):
     ai_topic_map = generate_ai_topic_map(unique_agendas)
     df['target'] = df['agenda'].map(ai_topic_map)
     df = df[df["target"].notna() & (df["target"] != "Other")].copy()    
+    print("Final Topic Distribution:\n", df["target"].value_counts())
     print("Preprocessing text...")
     df = preprocess(df)
     df["bert_text"] = df["text"].apply(preprocess_for_bert)
@@ -188,7 +189,7 @@ def run_bert(df_train, df_test, mode):
         data_collator=data_collator,
         compute_metrics=compute_metrics,
         weights_tensor=weights_tensor,
-        callbacks=[EarlyStoppingCallback(early_stopping_patience=3)]
+        callbacks=[EarlyStoppingCallback(early_stopping_patience=3)] # Early stopping, otherwiase performance tanks
     )
 
     print("Training RoBERTa...")
@@ -237,4 +238,4 @@ def run_experiments(mode, nrows=60000):
 
 if __name__ == "__main__":
     run_experiments(mode="breadcrumb")
-    run_experiments()
+    run_experiments(mode="ai")
