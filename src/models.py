@@ -207,9 +207,11 @@ def run_bert(df_train, df_test, mode):
     plot_confusion_matrix(y_true, y_pred, unique_labels, mode=mode)
 
 
-def run_experiments():
-    df = get_data(nrows=60_000)
-    #df = get_data_with_ai_mapping(nrows=30_000)
+def run_experiments(mode, nrows=60000):
+    if mode == "breadcrumb":
+        df = get_data(nrows=nrows)
+    else:
+        df = get_data_with_ai_mapping(nrows=nrows)
 
     df_train, df_test = train_test_split(
         df, test_size=0.2, random_state=42, stratify=df["target"]
@@ -225,13 +227,14 @@ def run_experiments():
     )
     X_train_vec = vectorizer.fit_transform(X_train_text)
     X_test_vec = vectorizer.transform(X_test_text)
-
+    
     run_naive_bayes(X_train_vec, X_test_vec, y_train, y_test)
     run_logistic_regression(X_train_vec, X_test_vec, y_train, y_test)
     run_xgboost(X_train_vec, X_test_vec, y_train, y_test)
 
-    run_bert(df_train, df_test, mode="breadcrumb")
+    run_bert(df_train, df_test, mode=mode)
 
 
 if __name__ == "__main__":
+    run_experiments(mode="breadcrumb")
     run_experiments()
